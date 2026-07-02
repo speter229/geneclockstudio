@@ -1,0 +1,21 @@
+[theme]
+base="dark"
+primaryColor="#00E0FF"               # Cyan/Teal accent
+backgroundColor="#0D1117"            # Deep navy background
+secondaryBackgroundColor="#2A2E35"   # Sidebar and widgets
+textColor="#F0F6FC"                  # Bright text
+font="manrope"
+
+[server]
+maxUploadSize = 1000  # 1 GB
+headless = true
+runOnSave = false
+enableCORS = true  # Allow cross-origin requests
+enableXsrfProtection = false  # Disable XSRF protection
+baseUrlPath="geneclockstudio"
+
+port = 8501  # 
+#address = "localhost" #FOR LOCAL TESTING
+
+#port = 80  #
+address = "0.0.0.0"  # SERVER DEPLOYMENT

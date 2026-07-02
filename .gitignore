@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets / credentials - never commit these
+backend/https_codes/*.key
+backend/https_codes/*.csr
+backend/https_codes/*.crt
+backend/data/users.json
+
+# Runtime / per-user generated data (differs per deployment, never sync via git)
+backend/temp/*
+!backend/temp/.gitkeep
+backend/saved_models/*
+!backend/saved_models/.gitkeep
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
