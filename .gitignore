@@ -15,6 +15,16 @@ backend/temp/*
 backend/saved_models/*
 !backend/saved_models/.gitkeep
 
+# Large bundled example beta-value matrices (100s of MB - 2GB): exceed GitHub's
+# 100MB per-file limit, so these are deployed via direct file copy (scp/rsync),
+# never through git. The small matching metadata CSVs stay tracked normally.
+backend/data/example_datasets/compute_age_training_subset_1_beta.csv
+backend/data/example_datasets/compute_age_training_subset_2_beta.csv
+backend/data/example_datasets/compute_age_training_subset_3_beta.csv
+
+# Raw source drop for the above (unrenamed duplicates, same huge files) - not needed in git
+/fix_datasets/
+
 # Editors / OS
 .vscode/
 .idea/

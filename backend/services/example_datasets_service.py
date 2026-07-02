@@ -14,6 +14,34 @@ EXAMPLE_TRAINING_DATASETS = {
         "beta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/demo_blood_beta.csv"),
         "meta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/demo_blood_meta.csv"),
     },
+    "compute_age_training_subset_1": {
+        "label": "Compute Age Training Subset 1 (528 samples, 225,112 CpGs)",
+        "description": (
+            "Fixed benchmark methylation subset with 528 samples and 225,112 CpG sites, "
+            "including Age and other metadata rows (~830 MB beta table)."
+        ),
+        "beta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/compute_age_training_subset_1_beta.csv"),
+        "meta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/compute_age_training_subset_1_meta.csv"),
+    },
+    "compute_age_training_subset_2": {
+        "label": "Compute Age Training Subset 2 (132 samples, 900,449 CpGs)",
+        "description": (
+            "Fixed benchmark methylation subset with 132 samples and 900,449 CpG sites, "
+            "including Age and other metadata rows (~840 MB beta table)."
+        ),
+        "beta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/compute_age_training_subset_2_beta.csv"),
+        "meta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/compute_age_training_subset_2_meta.csv"),
+    },
+    "compute_age_training_subset_3": {
+        "label": "Compute Age Training Subset 3 (1320 samples, 225,112 CpGs)",
+        "description": (
+            "Fixed benchmark methylation subset with 1320 samples and 225,112 CpG sites, "
+            "including Age and other metadata rows (~2 GB beta table). Loading and training "
+            "on this dataset will take noticeably longer than the smaller subsets."
+        ),
+        "beta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/compute_age_training_subset_3_beta.csv"),
+        "meta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/compute_age_training_subset_3_meta.csv"),
+    },
 }
 
 
