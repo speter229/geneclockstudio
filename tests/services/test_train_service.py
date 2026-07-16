@@ -38,6 +38,9 @@ class TestTrainService(unittest.TestCase):
         # Mock the ElasticNet model and its predict method
         mock_model = MagicMock()
         mock_model.predict.return_value = np.random.rand(4)  # Match the length of y_test
+        mock_model.named_steps = {
+            "elasticnet": MagicMock(coef_=np.zeros(len(df_betas.index)), alpha_=0.1, l1_ratio_=0.5)
+        }
         mock_train_elasticnet_model.return_value = mock_model
 
         mock_save_model_for_user.return_value = {
@@ -63,6 +66,7 @@ class TestTrainService(unittest.TestCase):
             alpha=params["alpha"],
             l1_ratio=params["l1_ratio"],
             max_iter=params["max_iter"],
+            auto_optimize=False,
         )
         mock_save_model_for_user.assert_called_once_with(
             mock_model, df_betas.index.tolist(), username, model_name

@@ -19,7 +19,7 @@ except Exception:
             raise NotImplementedError()
 from sklearn.model_selection import train_test_split
 import numpy as np
-from sklearn.linear_model import ElasticNet
+from sklearn.linear_model import ElasticNet, ElasticNetCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import cross_val_score
@@ -211,13 +211,17 @@ class MethylationDataset(Dataset):
             targets.append(age.numpy())
         return np.array(features), np.array(targets)
 
-def train_elasticnet_model(X_train, y_train, cv=2, alpha=0.1, l1_ratio=0.5, max_iter=50000):
+def train_elasticnet_model(X_train, y_train, cv=2, alpha=0.1, l1_ratio=0.5, max_iter=50000, auto_optimize=False):
     """
     Train an ElasticNet model with mean imputation if necessary.
 
     This function ensures X_train/y_train are numpy arrays, checks for NaNs,
     and wraps an imputer + ElasticNet in a pipeline so cross-validation and
     fitting never receive NaN values.
+
+    If auto_optimize is True, alpha and l1_ratio are picked automatically with
+    ElasticNetCV's internal cross-validation search (comparable to glmnet's
+    built-in tuning) instead of using the fixed alpha/l1_ratio values.
     """
     # Convert to numpy arrays (ensure numeric dtype)
     X_train = np.array(X_train, dtype=float)
@@ -226,15 +230,30 @@ def train_elasticnet_model(X_train, y_train, cv=2, alpha=0.1, l1_ratio=0.5, max_
     # If there are NaNs in X_train, we'll impute them with column means using SimpleImputer.
     imputer = SimpleImputer(strategy="mean")
 
-    # Create a pipeline: imputer -> ElasticNet
-    elastic = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, max_iter=max_iter)
-    pipeline = Pipeline([("imputer", imputer), ("elasticnet", elastic)])
-
     # Check for NaNs and warn (pipeline will handle them during fit/cv)
     if np.isnan(X_train).any():
         # Keep the behaviour deterministic: imputer will replace NaNs by column means
         # but surface a clear log message for debugging
         print("Warning: NaNs detected in X_train. Applying mean imputation before training.")
+
+    if auto_optimize:
+        # Search a small grid of l1_ratio values; ElasticNetCV searches alpha
+        # internally along a 30-point path. Kept deliberately small so the search
+        # finishes in a reasonable time for interactive use in the web app.
+        elastic = ElasticNetCV(
+            l1_ratio=[0.1, 0.5, 0.9, 1.0],
+            n_alphas=30,
+            cv=cv,
+            max_iter=max_iter,
+            n_jobs=-1,
+        )
+        pipeline = Pipeline([("imputer", imputer), ("elasticnet", elastic)])
+        pipeline.fit(X_train, y_train)
+        return pipeline
+
+    # Create a pipeline: imputer -> ElasticNet
+    elastic = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, max_iter=max_iter)
+    pipeline = Pipeline([("imputer", imputer), ("elasticnet", elastic)])
 
     # Perform cross-validation on the pipeline
     cv_scores = cross_val_score(

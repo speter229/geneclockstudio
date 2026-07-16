@@ -20,11 +20,13 @@ from frontend.utils import new_meta_temp_and_session_state_clenaup_3rd_page
 from frontend.utils import new_gene_temp_and_session_state_clenaup_3rd_page
 from backend.services.example_datasets_service import list_example_training_datasets
 from backend.services.example_datasets_service import get_example_training_dataset_paths
+from backend.services.example_genesets_service import list_example_genesets
+from backend.services.example_genesets_service import get_example_geneset_path
 import numpy as np
 import io
 import shutil
 
-st.set_page_config(page_title="Train your own epigenetic aging clock", layout="centered",page_icon="frontend/assets/dna_logo.jpg")
+st.set_page_config(page_title="Train your own gene set-specific aging clock", layout="centered",page_icon="frontend/assets/dna_logo.jpg")
 
 inject_global_css()
 
@@ -67,7 +69,7 @@ if st.session_state["show_help_3"]:
     2. **Upload methylation and metadata files**: Upload the required methylation and metadata CSV files.
     3. **The beta values table format**: Every row is a CpG site, and every column is a sample (row and column names should be unique). Apart from that, only float values are allowed.
     4. **The metadata** table format is as follows: every column is a sample, and every row is a feature (the row must contain the 'age' column where only float values are accepted).
-    5. **Optional**: If needed, upload a gene list to filter CpG sites. The gene list must be in CSV format and contain one column named `Gene_ID`. The gene names must be HGNC gene symbols.
+    5. **Optional**: If needed, filter CpG sites to a gene set, either by uploading your own gene list (CSV format, one column named `Gene_ID` with HGNC gene symbols) or by picking a bundled built-in gene set (e.g. the GenAge human ageing-related genes).
     6. **Promoter selection**: Choose whether to filter CpG sites to certain genes and whether to include only promoter regions. The promoter region is defined to encompass the TSS1500, TSS200, 5'UTR, and 1stExon genomic regions.
     7. **Filtered CpG sites**: If you filtered the sites with a gene set, the number of remaining CpG sites will be displayed, and on a plot showing their positions on chromosomes.
     8. **Choose a model**: Select a model (ElasticNet, XGBoost, RandomForest) and configure its parameters.
@@ -75,7 +77,7 @@ if st.session_state["show_help_3"]:
     10. **View results**: After training is complete, the results will be displayed, and you will have the option to download the trained model.
                         """)
 
-st.title("🧬 Create Your Own Biological Aging Clock")
+st.title("🧬 Train Your Own Gene Set-Specific Aging Clock")
 
 require_authentication()
 
@@ -134,6 +136,8 @@ uploaded_meta = None
 
 if "uploaded_gene_name" not in st.session_state:
             st.session_state["uploaded_gene_name"] = None
+if "builtin_genes_file_path" not in st.session_state:
+            st.session_state["builtin_genes_file_path"] = None
 
 if st.session_state["start_button_clicked"]:
     st.session_state["data_source_choice"] = st.radio(
@@ -324,61 +328,105 @@ if st.session_state["dfs_valid"] == True and st.session_state["gene_cpgs_result"
     )
 
     if st.session_state["gene_selection_option"] != "No":
-        st.write("**Criteria for gene upload:**")
-        st.write("- File format: CSV")
-        st.write("- Must contain one column named `Gene_ID`")
-        st.write("- Gene names should be listed in the `Gene_ID` column")
-        st.write("-  The gene names must be HGNC gene symbols ")
+        # Determine promoter selection based on the chosen option
+        is_promoter_only = st.session_state["gene_selection_option"] == "Yes (only CpG sites within promoter regions)"
 
-        uploaded_genes = st.file_uploader("Upload a CSV file with HGNC gene symbols for filtering", type=["csv"], key=st.session_state["gene_uploader_key"])
-        if uploaded_genes:
-            if uploaded_genes.name != st.session_state["uploaded_gene_name"]:
-                st.session_state["uploaded_gene_name"] = uploaded_genes.name
-                #new beta value table uploaded
+        gene_source = st.radio(
+            "Gene set source",
+            ["Upload my own gene list", "Use a built-in gene set"],
+            key="gene_source_radio",
+            horizontal=True,
+        )
+
+        genes_file_path = None
+
+        if gene_source == "Upload my own gene list":
+            st.write("**Criteria for gene upload:**")
+            st.write("- File format: CSV")
+            st.write("- Must contain one column named `Gene_ID`")
+            st.write("- Gene names should be listed in the `Gene_ID` column")
+            st.write("-  The gene names must be HGNC gene symbols ")
+
+            uploaded_genes = st.file_uploader("Upload a CSV file with HGNC gene symbols for filtering", type=["csv"], key=st.session_state["gene_uploader_key"])
+            if uploaded_genes:
+                if uploaded_genes.name != st.session_state["uploaded_gene_name"]:
+                    st.session_state["uploaded_gene_name"] = uploaded_genes.name
+                    #new beta value table uploaded
+                    new_gene_temp_and_session_state_clenaup_3rd_page()
+                    try:
+                        # Save the gene filter file to the temp directory
+                        genes_file_path = os.path.join(user_temp_path, uploaded_genes.name)
+                        with open(genes_file_path, "wb") as f:
+                            f.write(uploaded_genes.getbuffer())
+                        temp_remove(genes_file_path)
+                        st.session_state["df_genes"] = pd.read_csv(genes_file_path)
+                    except Exception as e:
+                        st.error(f"❌ Error reading the gene filter file: {e}")
+                        st.stop()
+                else:
+                    genes_file_path = None
+            else:
+                st.info("Please upload a gene filter CSV file to proceed.")
+                st.stop()
+        else:
+            example_genesets = list_example_genesets()
+            geneset_ids = list(example_genesets.keys())
+            geneset_labels = [example_genesets[gid]["label"] for gid in geneset_ids]
+            selected_geneset_label = st.selectbox("Choose a bundled example gene set", geneset_labels)
+            selected_geneset_id = geneset_ids[geneset_labels.index(selected_geneset_label)]
+            st.caption(example_genesets[selected_geneset_id]["description"])
+
+            if st.button("📂 Load Example Gene Set"):
                 new_gene_temp_and_session_state_clenaup_3rd_page()
                 try:
-                    # Save the gene filter file to the temp directory
-                    genes_file_path = os.path.join(user_temp_path, uploaded_genes.name)
-                    with open(genes_file_path, "wb") as f:
-                        f.write(uploaded_genes.getbuffer())
-                    temp_remove(genes_file_path)
-                    st.session_state["df_genes"] = pd.read_csv(genes_file_path)
+                    src_genes_path = get_example_geneset_path(selected_geneset_id)
+                    dest_name = f"{selected_geneset_id}.csv"
+                    dest_path = os.path.join(user_temp_path, dest_name)
+                    # Copy the bundled gene set into the user's own temp folder, so the
+                    # bundled original is never deleted by the backend's cleanup step.
+                    shutil.copyfile(src_genes_path, dest_path)
+                    temp_remove(dest_path)
+                    st.session_state["uploaded_gene_name"] = dest_name
+                    st.session_state["df_genes"] = pd.read_csv(dest_path)
+                    genes_file_path = dest_path
+                    st.session_state["builtin_genes_file_path"] = dest_path
                 except Exception as e:
-                    st.error(f"❌ Error reading the gene filter file: {e}")
+                    st.error(f"❌ Error loading example gene set: {e}")
+                    st.stop()
+            elif st.session_state.get("builtin_genes_file_path") and os.path.exists(st.session_state["builtin_genes_file_path"]):
+                genes_file_path = st.session_state["builtin_genes_file_path"]
+            else:
+                st.info("Click \"Load Example Gene Set\" to proceed.")
+                st.stop()
+
+        if genes_file_path:
+            # Send API request to filter CpG sites
+            try:
+                gene_cpgs_response = requests.post(
+                    f"{API_URL}/train/gene_cpgs_request/",
+                    json={
+                        "genes_path": genes_file_path,
+                        "is_promoter_only": is_promoter_only,
+                    },
+                    headers=headers,
+                    verify=False
+                )
+                if gene_cpgs_response.status_code == 200:
+                    st.session_state["gene_cpgs_result"] = gene_cpgs_response.json()
+                    st.session_state["builtin_genes_file_path"] = None
+                    st.rerun()
+                else:
+                    # Parse the error message from the backend
+                    try:
+                        error_detail = gene_cpgs_response.json().get("detail", "Unknown error")
+                        st.error(f"❌ Error processing gene filter: {error_detail}")
+                    except Exception:
+                        st.error(f"❌ Error processing gene filter: Unable to parse error response. {gene_cpgs_response.text}")
                     st.stop()
 
-                # Determine promoter selection based on the chosen option
-                is_promoter_only = st.session_state["gene_selection_option"] == "Yes (only CpG sites within promoter regions)"
-
-                # Send API request to filter CpG sites
-                try:
-                    gene_cpgs_response = requests.post(
-                        f"{API_URL}/train/gene_cpgs_request/",
-                        json={
-                            "genes_path": genes_file_path,
-                            "is_promoter_only": is_promoter_only,
-                        },
-                        headers=headers,
-                        verify=False
-                    )
-                    if gene_cpgs_response.status_code == 200:
-                        st.session_state["gene_cpgs_result"] = gene_cpgs_response.json()
-                        st.rerun()
-                    else:
-                        # Parse the error message from the backend
-                        try:
-                            error_detail = gene_cpgs_response.json().get("detail", "Unknown error")
-                            st.error(f"❌ Error processing gene filter: {error_detail}")
-                        except Exception:
-                            st.error(f"❌ Error processing gene filter: Unable to parse error response. {gene_cpgs_response.text}")
-                        st.stop()
-
-                except Exception as e:
-                    st.error(f"❌ Exception occurred while calling gene_cpgs_request: {e}")
-                    st.stop()
-        else:
-            st.info("Please upload a gene filter CSV file to proceed.")
-            st.stop()
+            except Exception as e:
+                st.error(f"❌ Exception occurred while calling gene_cpgs_request: {e}")
+                st.stop()
 model_choice = None
 
 if(st.session_state["gene_cpgs_result"] != None):
@@ -429,23 +477,42 @@ if st.session_state["previous_model_choice"] != model_choice:
 if model_choice == "ElasticNet":
 
     st.markdown("### ElasticNet Parameters")
+
+    auto_optimize = st.checkbox(
+        "Automatically optimize regularization strength (recommended)",
+        value=True,
+        help=(
+            "Uses ElasticNetCV to search a grid of alpha/L1-ratio values with internal "
+            "cross-validation (similar to glmnet's built-in tuning) and picks the best "
+            "one automatically, instead of the fixed values below."
+        ),
+    )
+
     col1, col2 = st.columns(2)
     with col1:
-        alpha = st.slider("Alpha (Regularization Strength)", 0.0, 1.0, 0.5, 0.001)
+        alpha = st.slider("Alpha (Regularization Strength)", 0.0, 1.0, 0.01, 0.001, disabled=auto_optimize)
     with col2:
-        l1_ratio = st.slider("L1 Ratio (Mixing Parameter)", 0.0, 1.0, 0.5, 0.001)
+        l1_ratio = st.slider("L1 Ratio (Mixing Parameter)", 0.0, 1.0, 0.5, 0.001, disabled=auto_optimize)
 
     col3, col4 = st.columns(2)
     with col3:
-        max_iter = st.number_input("Max Iterations", min_value=1, value=100, max_value=1000, step=1)
+        max_iter = st.number_input("Max Iterations", min_value=1, value=10000, max_value=100000, step=100)
     with col4:
-        cv = st.number_input("Cross-Validation (CV)", min_value=2, max_value=4, value=2)
+        cv = st.number_input("Cross-Validation (CV)", min_value=2, max_value=10, value=3)
+
+    if auto_optimize:
+        st.caption(
+            "Auto-optimize searches alpha/L1-ratio combinations with internal CV, "
+            "which takes longer than a single fixed-parameter fit — expect it to take "
+            "from under a minute up to several minutes depending on dataset size."
+        )
 
     st.session_state["elasticnet_params"] = {
         "alpha": alpha,
         "l1_ratio": l1_ratio,
         "max_iter": max_iter,
         "cv": cv,
+        "auto_optimize": auto_optimize,
     }
 
 elif model_choice == "XGBoost":
@@ -542,7 +609,10 @@ if model_choice and model_choice != "Select a model":
                     r_value = result["r_value"]
                     download_path = result["download_path"]
                     st.session_state["download_path"] = download_path
-                    
+                    st.session_state["selected_cpgs"] = result.get("selected_cpgs")
+                    st.session_state["chosen_alpha"] = result.get("chosen_alpha")
+                    st.session_state["chosen_l1_ratio"] = result.get("chosen_l1_ratio")
+
                     # Create scatterplot
                     fig, ax = plt.subplots(figsize=(5, 4))
 
@@ -589,4 +659,22 @@ if st.session_state["scatterplot_fig"] != None and "scatterplot_fig" in st.sessi
         file_name="scatterplot.png",
         mime="image/png"
     )
+
+    if st.session_state.get("chosen_alpha") is not None:
+        st.write(
+            f"**Optimized ElasticNet hyperparameters:** alpha = {st.session_state['chosen_alpha']:.5f}, "
+            f"l1_ratio = {st.session_state['chosen_l1_ratio']:.3f}"
+        )
+
+    selected_cpgs = st.session_state.get("selected_cpgs")
+    if selected_cpgs:
+        cpg_csv_df = pd.DataFrame(selected_cpgs)
+        st.write(f"### {len(cpg_csv_df)} CpG sites have a nonzero coefficient in the trained ElasticNet model.")
+        st.download_button(
+            label="📥 Download Selected CpG Sites (CSV)",
+            data=cpg_csv_df.to_csv(index=False).encode("utf-8"),
+            file_name="selected_cpg_sites.csv",
+            mime="text/csv",
+        )
+
     st.write("### The trained model with the features order is stored. You can download it from the Home page later.")

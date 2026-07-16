@@ -78,6 +78,10 @@ def cleanup_temp_files_and_session_state_3rd_page():
         "random_forest_params",
         "download_path",
         "scatterplot_fig",
+        "selected_cpgs",
+        "chosen_alpha",
+        "chosen_l1_ratio",
+        "builtin_genes_file_path",
         "gene_selection_option",
         "show_help_3",
         "data_source_choice",
@@ -135,6 +139,10 @@ def new_beta_temp_and_session_state_clenaup_3rd_page():
         "random_forest_params",
         "download_path",
         "scatterplot_fig",
+        "selected_cpgs",
+        "chosen_alpha",
+        "chosen_l1_ratio",
+        "builtin_genes_file_path",
         "gene_selection_option",
         "show_help_3",
     ]
@@ -189,6 +197,10 @@ def new_meta_temp_and_session_state_clenaup_3rd_page():
         "random_forest_params",
         "download_path",
         "scatterplot_fig",
+        "selected_cpgs",
+        "chosen_alpha",
+        "chosen_l1_ratio",
+        "builtin_genes_file_path",
         "gene_selection_option",
         "show_help_3",
     ]
@@ -235,6 +247,10 @@ def new_gene_temp_and_session_state_clenaup_3rd_page():
         "random_forest_params",
         "download_path",
         "scatterplot_fig",
+        "selected_cpgs",
+        "chosen_alpha",
+        "chosen_l1_ratio",
+        "builtin_genes_file_path",
         "show_help_3",
     ]
     for var in other_variables:
@@ -280,11 +296,20 @@ def cleanup_temp_files_and_session_state_2nd_page():
         "df_betas_preview_2nd_page",
         "feature_coverage",
         "pred_df",
-        "model_choice_2nd_page"
+        "model_choice_2nd_page",
+        "builtin_prediction_meta_path",
     ]
     for var in other_variables:
         if var in st.session_state:
             st.session_state[var] = None
+
+    # Remove widget-tied session state variables so uploaders/radios reset
+    widget_tied_variables = [
+        "data_source_radio_2nd_page",
+    ]
+    for var in widget_tied_variables:
+        if var in st.session_state:
+            del st.session_state[var]
 
 def load_chromosome_data():
     """

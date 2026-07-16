@@ -14,8 +14,11 @@ from backend.services.temp_service import temp_remove
 from backend.config import TEMP_PATH
 from frontend.ui_utils import inject_global_css, set_background
 from frontend.utils import cleanup_temp_files_and_session_state_2nd_page
+from backend.services.example_datasets_service import list_example_prediction_datasets
+from backend.services.example_datasets_service import get_example_prediction_dataset_paths
 import datetime
 import io
+import shutil
 
 st.set_page_config(page_title="Biological Age Predictor", layout="centered",page_icon="frontend/assets/dna_logo.jpg")
 
@@ -55,7 +58,7 @@ if st.session_state["show_help_2"]:
     st.sidebar.markdown("### ℹ️ How to Use This Page")
     st.sidebar.markdown("""
     1. **Start New Predictions**: If you want to start a new predicting session, click the "🔄 Start New Predictions" button at the top of the page. You will be able to upload a new dataset and select the aging clock model parameters according to your preferences.
-    2. **Upload methylation data**: Upload the CSV file containing methylation data. Every column is a sample, and every row is a CpG site (the first column must contain the CpG site names). The first row must contain the sample names. The first column must contain the CpG sites.
+    2. **Upload methylation data**: Upload the CSV file containing methylation data, or pick "Use an example dataset" to try the tool with a bundled dataset. Every column is a sample, and every row is a CpG site (the first column must contain the CpG site names). The first row must contain the sample names. The first column must contain the CpG sites.
     3. **Validation**: If the uploaded file passes the validation checks, proceed to the next step.
     4. **Choose a model**: Select a model from the available options.
     5. **Run prediction**: Click the "🧠 Predict" button to start the prediction process.
@@ -114,14 +117,74 @@ if "beta_uploader_key" not in st.session_state:
         st.session_state["beta_uploader_key"] = "beta_uploader_key_0"
 if "meta_uploader_key" not in st.session_state:
         st.session_state["meta_uploader_key"] = "meta_uploader_key_0"
+if "builtin_prediction_meta_path" not in st.session_state:
+        st.session_state["builtin_prediction_meta_path"] = None
 
 uploaded_file= None
 
-if st.session_state["start_button_clicked"]:
-    # Upload methylation file
-    uploaded_file = st.file_uploader("Upload your methylation CSV", type=["csv"], key=st.session_state["beta_uploader_key"])
 
-if not uploaded_file and st.session_state["pred_df"] is not None:
+def process_new_betas_file(betas_path: str, display_name: str):
+    """Loads a beta-values CSV (uploaded or bundled) into session state:
+    validates it, stores a preview, and computes per-clock CpG coverage."""
+    st.session_state["uploaded_betas_name_2nd_page"] = display_name
+    st.session_state["feature_coverage"] = None
+    st.session_state["df_betas_preview_2nd_page"] = None
+    st.session_state["pred_df"] = None
+    st.session_state["betas_file_path_2nd_page"] = betas_path
+
+    df = pd.read_csv(betas_path, index_col=0)
+    if not all(df.dtypes == float):
+        st.error("❌ Error reading file: All values in the DataFrame must be float.")
+        st.stop()
+    st.session_state["df_betas_preview_2nd_page"] = df.iloc[:20, :20]
+
+    percents = requests.post(
+        f"{API_URL}/predictions/calculate_percent/",
+        json={"file_path": betas_path},
+        verify=False
+    )
+    if percents.status_code == 200:
+        st.session_state["feature_coverage"] = percents.json()
+    else:
+        st.error(f"❌ Error {percents.status_code}: {percents.text}")
+
+
+if st.session_state["start_button_clicked"]:
+    data_source_choice_2nd_page = st.radio(
+        "Data source",
+        ["Upload my own data", "Use an example dataset"],
+        key="data_source_radio_2nd_page",
+        horizontal=True,
+    )
+
+    if data_source_choice_2nd_page == "Upload my own data":
+        uploaded_file = st.file_uploader("Upload your methylation CSV", type=["csv"], key=st.session_state["beta_uploader_key"])
+    else:
+        example_pred_datasets = list_example_prediction_datasets()
+        example_pred_ids = list(example_pred_datasets.keys())
+        example_pred_labels = [example_pred_datasets[did]["label"] for did in example_pred_ids]
+        selected_pred_label = st.selectbox("Choose a bundled example dataset", example_pred_labels)
+        selected_pred_id = example_pred_ids[example_pred_labels.index(selected_pred_label)]
+        st.caption(example_pred_datasets[selected_pred_id]["description"])
+
+        if st.button("📂 Load Example Dataset"):
+            try:
+                src_beta_path, src_meta_path = get_example_prediction_dataset_paths(selected_pred_id)
+                dest_name = f"{selected_pred_id}_beta.csv"
+                dest_beta_path = os.path.join(user_temp_path, dest_name)
+                shutil.copyfile(src_beta_path, dest_beta_path)
+                temp_remove(dest_beta_path)
+
+                dest_meta_path = os.path.join(user_temp_path, f"{selected_pred_id}_meta.csv")
+                shutil.copyfile(src_meta_path, dest_meta_path)
+                temp_remove(dest_meta_path)
+                st.session_state["builtin_prediction_meta_path"] = dest_meta_path
+
+                process_new_betas_file(dest_beta_path, dest_name)
+            except Exception as e:
+                st.error(f"❌ Error loading example dataset: {e}")
+
+if not uploaded_file and st.session_state["pred_df"] is not None and st.session_state.get("uploaded_betas_name_2nd_page") is None:
     st.session_state["pred_df"] = None
 
 if "betas_file_path_2nd_page" not in st.session_state:
@@ -133,46 +196,21 @@ if "feature_coverage" not in st.session_state:
 
 
 if uploaded_file:
-    if uploaded_file.name != st.session_state["uploaded_betas_name_2nd_page"]:     
-        st.session_state["uploaded_betas_name_2nd_page"] = uploaded_file.name
+    if uploaded_file.name != st.session_state["uploaded_betas_name_2nd_page"]:
         try:
-            #new file has been uploaded
-            st.session_state["feature_coverage"] = None  
-            st.session_state["df_betas_preview_2nd_page"] = None
-            st.session_state["pred_df"] = None
+            st.session_state["builtin_prediction_meta_path"] = None
             # Save the uploaded file to the custom temp directory
-            st.session_state["betas_file_path_2nd_page"] = os.path.join(user_temp_path, uploaded_file.name)
-            with open(st.session_state["betas_file_path_2nd_page"], "wb") as f:
+            betas_file_path = os.path.join(user_temp_path, uploaded_file.name)
+            with open(betas_file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
 
             # Schedule the file for removal
-            temp_remove(st.session_state["betas_file_path_2nd_page"])
-            
-            df = pd.read_csv(st.session_state["betas_file_path_2nd_page"], index_col=0)
-            if not all(df.dtypes == float):
-                st.error("❌ Error reading uploaded file: All values in the DataFrame must be float.")
-                st.stop()
-            #save df preview to session state for later displaying
-            st.session_state["df_betas_preview_2nd_page"]=df.iloc[:20, :20]
+            temp_remove(betas_file_path)
 
-            index_list = df.index.tolist()
-            # Calculate the feature coverage for each model 
-            percents = requests.post(
-                f"{API_URL}/predictions/calculate_percent/",
-                json={"file_path": st.session_state["betas_file_path_2nd_page"]},  # Send data as JSON
-                verify=False
-            )
-
-            if percents.status_code == 200:
-                # Parse the response JSON
-                percent_data = percents.json()
-                st.session_state["feature_coverage"] = percent_data               
-            else:
-                st.error(f"❌ Error {percents.status_code}: {percents.text}")
-
+            process_new_betas_file(betas_file_path, uploaded_file.name)
         except Exception as e:
             st.error(f"❌ Error reading the uploaded file: {e}")
-            
+
 model_choice = None
 
 if st.session_state["feature_coverage"] is not None and st.session_state["df_betas_preview_2nd_page"] is not None:
@@ -194,7 +232,7 @@ if "prev_model_choice" not in st.session_state:
     st.session_state["prev_model_choice"] = None
 
 # Predict button
-if uploaded_file and model_choice:
+if st.session_state.get("betas_file_path_2nd_page") and model_choice:
     if st.button("🧠 Predict"):
         st.session_state["prev_model_choice"] = model_choice  # Reset the prediction DataFrame
 
@@ -242,11 +280,18 @@ if st.session_state["pred_df"] is not None and st.session_state["prev_model_choi
     st.markdown("---")
     st.markdown("### 📁 Upload metadata for evaluation")
 
+    meta_df = None
+    if st.session_state.get("builtin_prediction_meta_path"):
+        st.caption("Using the bundled 'age' metadata for the loaded example dataset. Upload your own file below to override it.")
+        meta_df = pd.read_csv(st.session_state["builtin_prediction_meta_path"], index_col=0)
+
     meta_file = st.file_uploader("Upload metadata CSV with 'age' row", type=["csv"], key=st.session_state["meta_uploader_key"])
     if meta_file:
+        meta_df = pd.read_csv(meta_file, index_col=0)
+
+    if meta_df is not None:
         try:
-            meta_df = pd.read_csv(meta_file, index_col=0)
-            
+
             # Use the refactored function to extract the age row
             age_row = extract_age_row(meta_df)
             pred_df = st.session_state["pred_df"]

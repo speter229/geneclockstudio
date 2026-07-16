@@ -162,12 +162,16 @@ def process_training_job(
         logging.info(f"First 3 X_train samples: {X_train[:3]}, First 3 y_train samples: {y_train[:3]}")
 
         # Train the model
+        elasticnet_selected_cpgs = None
+        chosen_alpha = None
+        chosen_l1_ratio = None
         if model_name == "ElasticNet":
             logging.info("Training ElasticNet model.")
             alpha = params.get("alpha", 0.1)
             l1_ratio = params.get("l1_ratio", 0.5)
             max_iter = params.get("max_iter", 1000)
             cv = params.get("cv", 5)
+            auto_optimize = params.get("auto_optimize", False)
 
             # Convert lists to numpy arrays to ensure consistent dtypes
             X_train_arr = np.array(X_train, dtype=float)
@@ -180,9 +184,23 @@ def process_training_job(
                 cv=cv,
                 alpha=alpha,
                 l1_ratio=l1_ratio,
-                max_iter=max_iter
+                max_iter=max_iter,
+                auto_optimize=auto_optimize,
             )
             logging.info("ElasticNet model trained successfully.")
+
+            # Surface the (auto-optimized or fixed) hyperparameters and the
+            # nonzero-coefficient CpG sites so the user can inspect/download them.
+            elasticnet_step = model.named_steps["elasticnet"]
+            chosen_alpha = float(getattr(elasticnet_step, "alpha_", alpha))
+            chosen_l1_ratio = float(getattr(elasticnet_step, "l1_ratio_", l1_ratio))
+            coefs = np.asarray(elasticnet_step.coef_, dtype=float)
+            nonzero_mask = coefs != 0
+            elasticnet_selected_cpgs = [
+                {"cpg": features_order[i], "coefficient": float(coefs[i])}
+                for i in np.where(nonzero_mask)[0]
+            ]
+            logging.info(f"ElasticNet selected {len(elasticnet_selected_cpgs)} nonzero-coefficient CpG sites out of {len(features_order)}.")
 
         elif model_name == "XGBoost":
             logging.info("Training XGBoost model.")
@@ -285,6 +303,9 @@ def process_training_job(
             "y_pred": y_pred_list,
             "mae": mae_value,
             "r_value": r_value_value,
+            "selected_cpgs": elasticnet_selected_cpgs,
+            "chosen_alpha": chosen_alpha,
+            "chosen_l1_ratio": chosen_l1_ratio,
             "message": "Training job processed successfully."
         }
         logging.info("Training job completed successfully.")

@@ -2,14 +2,17 @@ import os
 from backend.config import PROJECT_ROOT
 
 # Registry of bundled example beta-value/metadata pairs that users can load
-# instead of uploading their own data on the "Train Your Own Aging Clock" page.
+# instead of uploading their own data on the "Train your own gene set-specific aging clock" page.
 # Add new entries here to expose more built-in datasets in the UI.
 EXAMPLE_TRAINING_DATASETS = {
     "demo_blood_sample": {
-        "label": "Demo blood methylation sample (656 samples, 1281 CpGs)",
+        "label": "Demo blood methylation sample (656 samples, 21 CpGs)",
         "description": (
             "A small blood methylation dataset with a matching 'age' metadata row, "
-            "bundled so you can try out the training pipeline without uploading your own data."
+            "bundled so you can try out the training pipeline without uploading your own data. "
+            "Only 21 CpG sites are included, so this is best for a quick smoke test rather than "
+            "gene set-filtered training (use the Compute Age Training subsets or a custom upload "
+            "for that)."
         ),
         "beta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/demo_blood_beta.csv"),
         "meta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/demo_blood_meta.csv"),
@@ -58,4 +61,36 @@ def get_example_training_dataset_paths(dataset_id: str):
     if dataset_id not in EXAMPLE_TRAINING_DATASETS:
         raise ValueError(f"Unknown example dataset: {dataset_id}")
     info = EXAMPLE_TRAINING_DATASETS[dataset_id]
+    return info["beta_path"], info["meta_path"]
+
+
+# Registry of bundled example beta-value/metadata pairs that users can load
+# instead of uploading their own data on the "Apply Built-in Aging Clocks" page.
+EXAMPLE_PREDICTION_DATASETS = {
+    "inflammatory_clocks_demo": {
+        "label": "Blood inflammatory clocks demo (36 healthy control samples, 1308 CpGs)",
+        "description": (
+            "36 healthy-control blood samples covering 100% of the CpG sites used by all "
+            "four built-in inflammatory clocks, so you can try out predictions on data "
+            "known to work well without uploading your own file."
+        ),
+        "beta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/apply_demo_inflammatory_clocks_beta.csv"),
+        "meta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/apply_demo_inflammatory_clocks_meta.csv"),
+    },
+}
+
+
+def list_example_prediction_datasets():
+    """Returns the id -> {label, description} mapping for UI display."""
+    return {
+        dataset_id: {"label": info["label"], "description": info["description"]}
+        for dataset_id, info in EXAMPLE_PREDICTION_DATASETS.items()
+    }
+
+
+def get_example_prediction_dataset_paths(dataset_id: str):
+    """Returns (beta_path, meta_path) for a bundled example prediction dataset id."""
+    if dataset_id not in EXAMPLE_PREDICTION_DATASETS:
+        raise ValueError(f"Unknown example dataset: {dataset_id}")
+    info = EXAMPLE_PREDICTION_DATASETS[dataset_id]
     return info["beta_path"], info["meta_path"]
