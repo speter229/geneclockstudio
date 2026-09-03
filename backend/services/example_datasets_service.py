@@ -1,5 +1,7 @@
 import os
+import shutil
 from backend.config import PROJECT_ROOT
+from backend.services.secure_features_service import materialize_protected_file
 
 # Registry of bundled example beta-value/metadata pairs that users can load
 # instead of uploading their own data on the "Train your own gene set-specific aging clock" page.
@@ -76,6 +78,10 @@ EXAMPLE_PREDICTION_DATASETS = {
         ),
         "beta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/apply_demo_inflammatory_clocks_beta.csv"),
         "meta_path": os.path.join(PROJECT_ROOT, "backend/data/example_datasets/apply_demo_inflammatory_clocks_meta.csv"),
+        # This beta table was assembled to cover the clocks 100%, so its row index is
+        # exactly the union of their secret CpG sites: it is stored encrypted at rest
+        # (see secure_features_service) and only decrypted into the user's temp folder.
+        "protected_beta_name": os.path.join("example_datasets", "apply_demo_inflammatory_clocks_beta.csv"),
     },
 }
 
@@ -88,9 +94,42 @@ def list_example_prediction_datasets():
     }
 
 
+def is_protected_prediction_dataset(dataset_id: str) -> bool:
+    """True if the dataset's beta table is encrypted at rest.
+
+    Such a table was assembled to cover a built-in clock completely, so its row
+    index is that clock's proprietary CpG list and must not be displayed.
+    """
+    info = EXAMPLE_PREDICTION_DATASETS.get(dataset_id, {})
+    return bool(info.get("protected_beta_name"))
+
+
 def get_example_prediction_dataset_paths(dataset_id: str):
     """Returns (beta_path, meta_path) for a bundled example prediction dataset id."""
     if dataset_id not in EXAMPLE_PREDICTION_DATASETS:
         raise ValueError(f"Unknown example dataset: {dataset_id}")
     info = EXAMPLE_PREDICTION_DATASETS[dataset_id]
     return info["beta_path"], info["meta_path"]
+
+
+def materialize_example_prediction_dataset(dataset_id: str, dest_beta_path: str, dest_meta_path: str):
+    """Places a bundled example prediction dataset into the user's temp folder.
+
+    Handles both plain and encrypted-at-rest beta tables, so the caller does not
+    need to know which of the two a given dataset uses.
+
+    Returns:
+        tuple: (dest_beta_path, dest_meta_path)
+    """
+    if dataset_id not in EXAMPLE_PREDICTION_DATASETS:
+        raise ValueError(f"Unknown example dataset: {dataset_id}")
+    info = EXAMPLE_PREDICTION_DATASETS[dataset_id]
+
+    protected_name = info.get("protected_beta_name")
+    if protected_name:
+        materialize_protected_file(protected_name, dest_beta_path)
+    else:
+        shutil.copyfile(info["beta_path"], dest_beta_path)
+
+    shutil.copyfile(info["meta_path"], dest_meta_path)
+    return dest_beta_path, dest_meta_path

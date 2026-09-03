@@ -3,6 +3,12 @@ import pandas as pd
 import numpy as np
 import os
 from backend.config import PROJECT_ROOT  # Import PROJECT_ROOT
+from backend.services.secure_features_service import read_protected_csv
+
+# The clock coverage percentages are reported in steps of this many percent. Exact
+# values would let a client recover a clock's secret CpG list by repeatedly asking
+# for the coverage of hand-picked CpG subsets; coarse buckets make that impractical.
+COVERAGE_STEP_PERCENT = 5
 
 def calculate_percent(clock_cpgs, table_cpgs):
     '''
@@ -17,33 +23,42 @@ def calculate_percent(clock_cpgs, table_cpgs):
     common_elements = table_set.intersection(clock_set)
     return (len(common_elements) / len(clock_set)) * 100
 
+def bucket_percent(percent):
+    '''
+    Round a coverage percentage DOWN to the nearest COVERAGE_STEP_PERCENT step, so the
+    reported value never overstates the real coverage and never reveals whether one
+    individual CpG site belongs to a clock.
+    '''
+    return int(percent // COVERAGE_STEP_PERCENT) * COVERAGE_STEP_PERCENT
+
 def calculate_feature_coverage (index_list):
     """
     Process a list of indices and return percents (the covered CpG sites for each aging clock).
+
+    The returned values are bucketed (see bucket_percent) because the CpG lists of the
+    built-in clocks are proprietary and must not be recoverable through this endpoint.
     """
-    hannum_cg_order_path = os.path.join(PROJECT_ROOT, "backend/data/Hannum_Inflammation_elnet_nonzero_cpg_order.csv")
-    hannum_cg_order = pd.read_csv(hannum_cg_order_path, index_col=0)
+    # Clock 1 and Clock 2 feature lists are encrypted at rest and decrypted in memory.
+    hannum_cg_order = read_protected_csv("Hannum_Inflammation_elnet_nonzero_cpg_order.csv", index_col=0)
     list_hannum_cg_order = hannum_cg_order['cpg'].tolist()
 
     altumAge_cg_order_path = os.path.join(PROJECT_ROOT, "backend/data/altumAge450k_elnet_nonzero_cg_order.csv")
     altumAge_cg_order = pd.read_csv(altumAge_cg_order_path)
     list_altumAge_cg_order = altumAge_cg_order['cpg'].tolist()
 
-    computage_elasticnet_cg_order_path = os.path.join(PROJECT_ROOT, "backend/data/computage_elnet_nonzero_cpg_order.csv")
-    computage_elasticnet_cg_order = pd.read_csv(computage_elasticnet_cg_order_path)
+    computage_elasticnet_cg_order = read_protected_csv("computage_elnet_nonzero_cpg_order.csv")
     list_computage_elasticnet_cg_order = computage_elasticnet_cg_order['cpg'].tolist()
 
-    computage_xgboost_cg_order_path = os.path.join(PROJECT_ROOT, "backend/data/inflamm_hugging_models_cg_order.csv")
-    computage_xgboost_cg_order = pd.read_csv(computage_xgboost_cg_order_path)
+    computage_xgboost_cg_order = read_protected_csv("inflamm_hugging_models_cg_order.csv")
     list_computage_xgboost_cg_order = computage_xgboost_cg_order['ID'].tolist()
 
     # Calculate the percentage of CpGs in the clock that are present in the given table
     result = [None] * 4
 
-    result[0] = round(calculate_percent(list_hannum_cg_order, index_list), 2)
-    result[1] = round(calculate_percent(list_altumAge_cg_order, index_list), 2)
-    result[2] = round(calculate_percent(list_computage_elasticnet_cg_order, index_list), 2)
-    result[3] = round(calculate_percent(list_computage_xgboost_cg_order, index_list), 2)
+    result[0] = bucket_percent(calculate_percent(list_hannum_cg_order, index_list))
+    result[1] = bucket_percent(calculate_percent(list_altumAge_cg_order, index_list))
+    result[2] = bucket_percent(calculate_percent(list_computage_elasticnet_cg_order, index_list))
+    result[3] = bucket_percent(calculate_percent(list_computage_xgboost_cg_order, index_list))
 
     return result
 
@@ -52,8 +67,7 @@ def reorder_df_for_model(cg_order_df, df_betas):
     Reorder the beta values to match the order of the model
     handles missing rows, values are filled with the mean of the row
     '''
-    inflamm_cg_mean_path = os.path.join(PROJECT_ROOT, "backend/data/inflammation_cg_means.csv")
-    inflamm_cg_mean = pd.read_csv(inflamm_cg_mean_path, index_col=0)
+    inflamm_cg_mean = read_protected_csv("inflammation_cg_means.csv", index_col=0)
     #the featuers order has to be that of the model
     filtered_betas = df_betas[df_betas.index.isin(cg_order_df.index)]
     # fill missing values with mean
@@ -82,8 +96,7 @@ def predict_biological_age(model_name: str, csv_df: pd.DataFrame) -> dict:
     if model_name == "Blood inflammatory Clock 1":
         model_path = os.path.join(PROJECT_ROOT, "backend/models/aging_clocks/hannum_inflamm_elastic_model_1.pkl")
         model = joblib.load(model_path)
-        cg_order_path = os.path.join(PROJECT_ROOT, "backend/data/hannum_elnet_cg_order.csv")
-        cg_order = pd.read_csv(cg_order_path, index_col=0)
+        cg_order = read_protected_csv("hannum_elnet_cg_order.csv", index_col=0)
     elif model_name == "Multi-tissue inflammatory clock":
         model_path = os.path.join(PROJECT_ROOT, "backend/models/aging_clocks/altumage450k_inflamm_elastic_model.pkl")
         model = joblib.load(model_path)
@@ -92,13 +105,11 @@ def predict_biological_age(model_name: str, csv_df: pd.DataFrame) -> dict:
     elif model_name == "Blood inflammatory Clock 2":
         model_path = os.path.join(PROJECT_ROOT, "backend/models/aging_clocks/hugging_inflamm_elastic_5.9MAE.pkl")
         model = joblib.load(model_path)
-        cg_order_path = os.path.join(PROJECT_ROOT, "backend/data/inflamm_hugging_models_cg_order.csv")
-        cg_order = pd.read_csv(cg_order_path, index_col=0)
+        cg_order = read_protected_csv("inflamm_hugging_models_cg_order.csv", index_col=0)
     elif model_name == "Blood inflammatory Clock XGBoost":
         model_path = os.path.join(PROJECT_ROOT, "backend/models/aging_clocks/hugging_inflamm_xgboost_model_5.4MAE.pkl")
         model = joblib.load(model_path)
-        cg_order_path = os.path.join(PROJECT_ROOT, "backend/data/inflamm_hugging_models_cg_order.csv")
-        cg_order = pd.read_csv(cg_order_path, index_col=0)
+        cg_order = read_protected_csv("inflamm_hugging_models_cg_order.csv", index_col=0)
     else:
         raise ValueError("Unknown model")
 

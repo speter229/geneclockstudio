@@ -50,8 +50,15 @@ if st.session_state["show_help_1"]:
 
 # Function to load dataset from the backend
 @st.cache_data(show_spinner="Loading dataset...")
-def load_dataset(name):
-    response = requests.get(f"{API_URL}/datasets/{name}", verify=False)
+def load_dataset(name, token):
+    # The endpoint requires a login, so the caller's token has to be passed through.
+    # It is part of the cache key as well, so one user's response is never served
+    # from cache to another.
+    response = requests.get(
+        f"{API_URL}/datasets/{name}",
+        headers={"Authorization": f"Bearer {token}"},
+        verify=False,
+    )
     response.raise_for_status()
     data = response.json()
     return data
@@ -88,7 +95,7 @@ else:
             st.session_state["selected_dataset"] = None
             st.rerun()  # Force rerun to immediately reflect the state change
 
-        dataset_data = load_dataset(st.session_state["selected_dataset"])
+        dataset_data = load_dataset(st.session_state["selected_dataset"], st.session_state["token"])
 
         # Display dataset description
         st.write("### Dataset Description")

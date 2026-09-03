@@ -1,9 +1,44 @@
 import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
+from backend.services.authenticator_service import get_current_user
 from unittest.mock import patch
 
 client = TestClient(app)
+
+TEST_USER = "pytest_user"
+
+
+@pytest.fixture(autouse=True)
+def authenticated():
+    """The dataset endpoint now requires a login, so every case here needs a user.
+
+    Restores whatever override was in place before (other test modules install their
+    own at import time on the same shared app object).
+    """
+    previous = app.dependency_overrides.get(get_current_user)
+    app.dependency_overrides[get_current_user] = lambda: TEST_USER
+    yield TEST_USER
+    if previous is None:
+        app.dependency_overrides.pop(get_current_user, None)
+    else:
+        app.dependency_overrides[get_current_user] = previous
+
+
+@pytest.fixture
+def unauthenticated():
+    """Removes any auth override so the endpoint sees an anonymous caller."""
+    previous = app.dependency_overrides.pop(get_current_user, None)
+    yield
+    if previous is not None:
+        app.dependency_overrides[get_current_user] = previous
+
+
+def test_get_dataset_requires_authentication(unauthenticated):
+    """The clock/dataset endpoints must not be reachable without a login."""
+    response = client.get("/datasets/GSE40279")
+    assert response.status_code in (401, 403)
+
 
 def test_get_dataset_success(mocker):
     """

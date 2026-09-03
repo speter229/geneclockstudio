@@ -17,6 +17,7 @@ from backend.schemas.train_schema import TrainModelRequest, CheckDFSRequest, Gen
 from backend.services.train_preprocess import cg_selection
 from backend.services.train_preprocess import prepocess_before_training
 from backend.services.train_preprocess import validate_gene_dataframe
+from backend.services.path_guard import resolve_user_data_path
 from scipy.stats import pearsonr
 
 router = APIRouter()
@@ -42,9 +43,10 @@ def cleanup_cache_in_time():
 @router.post("/check_dfs/")
 def check_dfs(request: CheckDFSRequest, current_user: str = Depends(get_current_user)):
     try:
-        # Perform validation and caching
-        betas_path = os.path.join(PROJECT_ROOT, request.betas_path)
-        metadata_path = os.path.join(PROJECT_ROOT, request.metadata_path)
+        # Perform validation and caching. The paths are restricted to the user data
+        # directories so they cannot be pointed at other files on the server.
+        betas_path = resolve_user_data_path(request.betas_path)
+        metadata_path = resolve_user_data_path(request.metadata_path)
 
         df_betas = pd.read_csv(betas_path, index_col=0)
         df_meta = pd.read_csv(metadata_path, index_col=0)
@@ -60,18 +62,23 @@ def check_dfs(request: CheckDFSRequest, current_user: str = Depends(get_current_
         cleanup_cache_in_time()
         
         return( check_dataframes(df_betas, df_meta))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/gene_cpgs_request/")
 def gene_cpgs_request(request: GeneCpGRequest, current_user: str = Depends(get_current_user)):
+    gene_filter_path = None
     try:
-        # Make path to file
-        gene_filter_path = os.path.join(PROJECT_ROOT, request.genes_path)
+        # Validate the client-supplied path: it must point inside the user data
+        # directories, otherwise this endpoint could be used to read back the row
+        # index of arbitrary server files (e.g. the secret clock CpG lists).
+        gene_filter_path = resolve_user_data_path(request.genes_path, must_exist=False)
         # Check if the file exists
         if not os.path.exists(gene_filter_path):
             raise HTTPException(status_code=400, detail="Gene filter saving to server failed.")
-        
+
         # Read the gene file into a dataframe
         df_genes = pd.read_csv(gene_filter_path)
         
@@ -154,7 +161,7 @@ def gene_cpgs_request(request: GeneCpGRequest, current_user: str = Depends(get_c
         raise HTTPException(status_code=500, detail="An unexpected error occurred while processing the request.")
     finally:
         # Cleanup the gene filter file
-        if os.path.exists(gene_filter_path):
+        if gene_filter_path and os.path.exists(gene_filter_path):
             try:
                 os.remove(gene_filter_path)
                 logging.info(f"Successfully removed gene filter file: {gene_filter_path}")
@@ -179,7 +186,8 @@ def train_model(request: TrainModelRequest, current_user: str = Depends(get_curr
 
         # Call the process_training_job function with the username
         result = process_training_job(
-            df_betas, df_meta, request.model_name, params, username=current_user
+            df_betas, df_meta, request.model_name, params,
+            username=current_user, test_size=request.test_size
         )
 
         # Sanitize result to ensure JSON serializability (replace NaN/inf with None and convert numpy types)
@@ -265,9 +273,13 @@ def download_model(model_id: str, current_user: str = Depends(get_current_user))
         # Return the file as a response
         return FileResponse(model_path, filename=model_filename, media_type="application/octet-stream")
 
+    except HTTPException:
+        # Keep the intended 403/404 instead of masking it as a 500 that echoes
+        # the internal error text back to the caller.
+        raise
     except Exception as e:
         logging.error(f"Error in download_model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Could not serve the model file.")
 
 # Endpoint to list all models for the authenticated user
 @router.get("/list/")

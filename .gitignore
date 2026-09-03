@@ -8,6 +8,17 @@ backend/https_codes/*.key
 backend/https_codes/*.csr
 backend/https_codes/*.crt
 backend/data/users.json
+.secrets/
+
+# Proprietary clock feature lists. Only the encrypted *.enc versions belong in git;
+# the plaintext CSVs are produced locally by scripts/protect_clock_features.py
+# --decrypt for maintenance and must never be committed again.
+backend/data/hannum_elnet_cg_order.csv
+backend/data/Hannum_Inflammation_elnet_nonzero_cpg_order.csv
+backend/data/inflamm_hugging_models_cg_order.csv
+backend/data/computage_elnet_nonzero_cpg_order.csv
+backend/data/inflammation_cg_means.csv
+backend/data/example_datasets/apply_demo_inflammatory_clocks_beta.csv
 
 # Runtime / per-user generated data (differs per deployment, never sync via git)
 backend/temp/*

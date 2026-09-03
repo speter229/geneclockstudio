@@ -473,7 +473,33 @@ if st.session_state["previous_model_choice"] != model_choice:
     st.session_state["scatterplot_fig"] = None  # Reset the scatterplot figure if the model choice changes
     st.session_state["previous_model_choice"] = model_choice  # Update the previous model choice
 
-# Model parameters  
+# Train / evaluation split - applies to every model type
+if model_choice and model_choice != "Select a model":
+    st.markdown("### Training / evaluation split")
+    # The explicit key is what makes the choice survive Streamlit's reruns: without
+    # it the widget is re-created on every rerun and silently falls back to 80, so a
+    # user who moved the slider still got trained at 80/20.
+    train_percent = st.slider(
+        "Percentage of the dataset used for training",
+        min_value=50,
+        max_value=90,
+        value=80,
+        step=5,
+        key="train_percent",
+        help=(
+            "The samples are split into a training set and an evaluation (test) set. "
+            "The model is fitted on the training set only, and the MAE / R values "
+            "below are measured on the held-back evaluation set. 80% training / 20% "
+            "evaluation is the usual default: more training data generally gives a "
+            "better model, while a larger evaluation set gives more reliable metrics."
+        ),
+    )
+    st.caption(
+        f"{train_percent}% of the samples are used for training, "
+        f"{100 - train_percent}% for evaluation."
+    )
+
+# Model parameters
 if model_choice == "ElasticNet":
 
     st.markdown("### ElasticNet Parameters")
@@ -586,11 +612,22 @@ if model_choice and model_choice != "Select a model":
                 if st.session_state["gene_selection_option"] != "No" and genes_file_path:
                     files["gene_filter_path"] = genes_file_path
 
+                # Session-state key holding the parameters of each model type. Note that
+                # RandomForest's key is not simply model_choice.lower(), so it needs the
+                # explicit mapping - otherwise its parameters are silently dropped.
+                model_param_keys = {
+                    "ElasticNet": "elasticnet_params",
+                    "XGBoost": "xgboost_params",
+                    "RandomForest": "random_forest_params",
+                }
+                model_params = st.session_state.get(model_param_keys[model_choice], {})
+
                 response = requests.post(
                     f"{API_URL}/train/train_model/",
                     json={
                         "model_name": model_choice,
-                        "model_params": json.dumps(st.session_state.get(f"{model_choice.lower()}_params", {})),
+                        "model_params": json.dumps(model_params),
+                        "test_size": round((100 - st.session_state.get("train_percent", 80)) / 100, 2),
                         "gene_filter_path": genes_file_path if st.session_state["gene_selection_option"] != "No" else None,
                         "is_promoter_only": is_promoter_only,
                     },
@@ -612,6 +649,15 @@ if model_choice and model_choice != "Select a model":
                     st.session_state["selected_cpgs"] = result.get("selected_cpgs")
                     st.session_state["chosen_alpha"] = result.get("chosen_alpha")
                     st.session_state["chosen_l1_ratio"] = result.get("chosen_l1_ratio")
+
+                    n_train = result.get("n_train_samples")
+                    n_test = result.get("n_test_samples")
+                    if n_train is not None and n_test is not None:
+                        st.info(
+                            f"Trained on {n_train} samples, evaluated on {n_test} held-back "
+                            f"samples ({100 - st.session_state.get('train_percent', 80)}% "
+                            "evaluation split)."
+                        )
 
                     # Create scatterplot
                     fig, ax = plt.subplots(figsize=(5, 4))

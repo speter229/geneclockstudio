@@ -109,7 +109,8 @@ def process_training_job(
     df_meta: pd.DataFrame,
     model_name: str,
     params: dict,
-    username: str = None
+    username: str = None,
+    test_size: float = 0.2
 ) -> dict:
     """
     Processes the training job with the given features. Returns model features, predictions and evaluation metrics.
@@ -119,6 +120,8 @@ def process_training_job(
         model_name (str): The name of the model to be trained (e.g., "ElasticNet", "XGBoost", "RandomForest").
         params (dict): Dictionary containing hyperparameters for the model.
         username (str, optional): The username of the model owner. Defaults to None.
+        test_size (float, optional): Fraction of the samples held back for evaluation.
+            Defaults to 0.2, i.e. an 80/20 train/evaluation split.
     Returns:
         dict: A dictionary containing the features order, predictions, and evaluation metrics.
     """
@@ -140,8 +143,17 @@ def process_training_job(
         transcriptomic_dataset = MethylationDataset(df_meta, df_betas)
 
         # Train-test split
-        logging.info("Splitting data into train and test sets.")
-        train_data, test_data = train_test_split(transcriptomic_dataset, test_size=0.2, random_state=42)
+        if not 0.1 <= test_size <= 0.5:
+            raise ValueError(
+                "The evaluation split must be between 10% and 50% of the dataset "
+                f"(got {test_size:.0%})."
+            )
+        logging.info(
+            f"Splitting data into train and test sets ({1 - test_size:.0%}/{test_size:.0%})."
+        )
+        train_data, test_data = train_test_split(
+            transcriptomic_dataset, test_size=test_size, random_state=42
+        )
         logging.info(f"Train data size: {len(train_data)}")
         logging.info(f"Test data size: {len(test_data)}")
 
@@ -306,6 +318,9 @@ def process_training_job(
             "selected_cpgs": elasticnet_selected_cpgs,
             "chosen_alpha": chosen_alpha,
             "chosen_l1_ratio": chosen_l1_ratio,
+            "test_size": float(test_size),
+            "n_train_samples": len(train_data),
+            "n_test_samples": len(test_data),
             "message": "Training job processed successfully."
         }
         logging.info("Training job completed successfully.")

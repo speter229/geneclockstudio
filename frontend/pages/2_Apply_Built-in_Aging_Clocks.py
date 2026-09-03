@@ -15,10 +15,10 @@ from backend.config import TEMP_PATH
 from frontend.ui_utils import inject_global_css, set_background
 from frontend.utils import cleanup_temp_files_and_session_state_2nd_page
 from backend.services.example_datasets_service import list_example_prediction_datasets
-from backend.services.example_datasets_service import get_example_prediction_dataset_paths
+from backend.services.example_datasets_service import materialize_example_prediction_dataset
+from backend.services.example_datasets_service import is_protected_prediction_dataset
 import datetime
 import io
-import shutil
 
 st.set_page_config(page_title="Biological Age Predictor", layout="centered",page_icon="frontend/assets/dna_logo.jpg")
 
@@ -70,6 +70,11 @@ if st.session_state["show_help_2"]:
 st.title("🔬 Apply built-in aging clocks on your methylation data")
 
 require_authentication()
+
+# The prediction endpoints require a logged-in user, so every call needs the token.
+headers = {
+    "Authorization": f"Bearer {st.session_state['token']}"
+}
 
 # Ensure the username is available in session state
 username = st.session_state.get("username", "default_user")  # Use "default_user" if username is not set
@@ -123,24 +128,36 @@ if "builtin_prediction_meta_path" not in st.session_state:
 uploaded_file= None
 
 
-def process_new_betas_file(betas_path: str, display_name: str):
+def process_new_betas_file(betas_path: str, display_name: str, mask_cpg_ids: bool = False):
     """Loads a beta-values CSV (uploaded or bundled) into session state:
-    validates it, stores a preview, and computes per-clock CpG coverage."""
+    validates it, stores a preview, and computes per-clock CpG coverage.
+
+    Args:
+        mask_cpg_ids: Hide the CpG row labels in the preview. Set for bundled demo
+            datasets whose row index is the protected CpG list of a built-in clock -
+            printing 20 of those identifiers would hand out 20 confirmed clock sites.
+    """
     st.session_state["uploaded_betas_name_2nd_page"] = display_name
     st.session_state["feature_coverage"] = None
     st.session_state["df_betas_preview_2nd_page"] = None
     st.session_state["pred_df"] = None
     st.session_state["betas_file_path_2nd_page"] = betas_path
+    st.session_state["preview_cpg_ids_masked"] = mask_cpg_ids
 
     df = pd.read_csv(betas_path, index_col=0)
     if not all(df.dtypes == float):
         st.error("❌ Error reading file: All values in the DataFrame must be float.")
         st.stop()
-    st.session_state["df_betas_preview_2nd_page"] = df.iloc[:20, :20]
+    preview = df.iloc[:20, :20]
+    if mask_cpg_ids:
+        preview = preview.copy()
+        preview.index = [f"CpG site {i + 1}" for i in range(len(preview))]
+    st.session_state["df_betas_preview_2nd_page"] = preview
 
     percents = requests.post(
         f"{API_URL}/predictions/calculate_percent/",
         json={"file_path": betas_path},
+        headers=headers,
         verify=False
     )
     if percents.status_code == 200:
@@ -169,18 +186,23 @@ if st.session_state["start_button_clicked"]:
 
         if st.button("📂 Load Example Dataset"):
             try:
-                src_beta_path, src_meta_path = get_example_prediction_dataset_paths(selected_pred_id)
                 dest_name = f"{selected_pred_id}_beta.csv"
                 dest_beta_path = os.path.join(user_temp_path, dest_name)
-                shutil.copyfile(src_beta_path, dest_beta_path)
-                temp_remove(dest_beta_path)
-
                 dest_meta_path = os.path.join(user_temp_path, f"{selected_pred_id}_meta.csv")
-                shutil.copyfile(src_meta_path, dest_meta_path)
+
+                materialize_example_prediction_dataset(
+                    selected_pred_id, dest_beta_path, dest_meta_path
+                )
+                temp_remove(dest_beta_path)
                 temp_remove(dest_meta_path)
                 st.session_state["builtin_prediction_meta_path"] = dest_meta_path
 
-                process_new_betas_file(dest_beta_path, dest_name)
+                # Bundled demo tables that are encrypted at rest are indexed by the
+                # clocks' secret CpG sites, so their row labels stay hidden.
+                is_protected_demo = is_protected_prediction_dataset(selected_pred_id)
+                process_new_betas_file(
+                    dest_beta_path, dest_name, mask_cpg_ids=is_protected_demo
+                )
             except Exception as e:
                 st.error(f"❌ Error loading example dataset: {e}")
 
@@ -217,13 +239,19 @@ if st.session_state["feature_coverage"] is not None and st.session_state["df_bet
     # Display the preview of the DataFrame
     st.markdown("### 📊 Methylation Data Preview")
     st.dataframe(st.session_state["df_betas_preview_2nd_page"])
+    if st.session_state.get("preview_cpg_ids_masked"):
+        st.caption(
+            "The CpG identifiers of this bundled demo dataset are part of the "
+            "proprietary clock feature lists, so they are not shown."
+        )
 
-    # Display percentages of covered CpG sites in each model
+    # Display percentages of covered CpG sites in each model. The CpG lists of the
+    # clocks are proprietary, so the backend reports coverage in 5% steps only.
     st.write("### Percentages of covered CpG sites in each model")
-    st.write(f"**Blood inflammatory Clock 1**: {st.session_state['feature_coverage']['inflammation_Hannum_ELASTICNET']}%")
-    st.write(f"**Multi-tissue inflammatory clock**: {st.session_state['feature_coverage']['inflammation_AltumAge450k_ELASTICNET']}%")
-    st.write(f"**Blood inflammatory Clock 2**: {st.session_state['feature_coverage']['inflammation_computage_ELASTICNET']}%")
-    st.write(f"**Blood inflammatory Clock XGBoost**: {st.session_state['feature_coverage']['inflammation_computage_XGBoost']}%")
+    st.write(f"**Blood inflammatory Clock 1**: at least {st.session_state['feature_coverage']['inflammation_Hannum_ELASTICNET']}%")
+    st.write(f"**Multi-tissue inflammatory clock**: at least {st.session_state['feature_coverage']['inflammation_AltumAge450k_ELASTICNET']}%")
+    st.write(f"**Blood inflammatory Clock 2**: at least {st.session_state['feature_coverage']['inflammation_computage_ELASTICNET']}%")
+    st.write(f"**Blood inflammatory Clock XGBoost**: at least {st.session_state['feature_coverage']['inflammation_computage_XGBoost']}%")
 
     # Choose model
     model_choice = st.selectbox("Choose a model", ["Blood inflammatory Clock 1", "Multi-tissue inflammatory clock", "Blood inflammatory Clock 2", "Blood inflammatory Clock XGBoost"])
@@ -245,6 +273,7 @@ if st.session_state.get("betas_file_path_2nd_page") and model_choice:
             response = requests.post(
                 f"{API_URL}/predictions/predict/",
                 json=data,  # Send data as JSON
+                headers=headers,
                 verify=False
             )
 
