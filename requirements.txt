@@ -24,7 +24,11 @@ colorama==0.4.6
 colored==2.3.0
 comm==0.1.3
 contourpy==1.3.1
-cryptography==46.0.5
+# Range, not a pin: cryptography 46.x requires cffi>=2.0.0, which conflicts with
+# the cffi==1.17.1 pinned below and makes a clean `pip install -r` impossible.
+# 42-45 need only cffi>=1.12 and use the same Fernet format, so the encrypted
+# clock feature files decrypt identically.
+cryptography>=42,<46
 cycler==0.12.1
 debugpy==1.6.7
 decorator==5.1.1
